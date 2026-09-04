@@ -2,10 +2,14 @@
 
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\CategoryController;
+use App\Http\Controllers\CreditController;
 use App\Http\Controllers\CustomerController;
 use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\ExpenseController;
 use App\Http\Controllers\ProductController;
+use App\Http\Controllers\ProductLookupController;
 use App\Http\Controllers\SaleController;
+use App\Http\Controllers\ServiceController;
 use App\Http\Controllers\SupplierController;
 use App\Http\Controllers\UserController;
 use Illuminate\Support\Facades\Route;
@@ -19,13 +23,24 @@ Route::middleware('auth')->group(function () {
     Route::post('/logout', [AuthController::class, 'logout'])->name('logout');
     Route::get('/dashboard', [DashboardController::class, 'index'])->name('dashboard');
 
-    Route::resource('sales', SaleController::class)->only(['index', 'create', 'store', 'show', 'destroy']);
-    Route::resource('customers', CustomerController::class)->except(['show']);
-    Route::resource('products', ProductController::class)->except(['show']);
+    Route::get('/sales/{sale}/receipt', [SaleController::class, 'receipt'])->name('sales.receipt');
+    Route::resource('sales', SaleController::class)->only(['index', 'create', 'store', 'show']);
+    Route::resource('customers', CustomerController::class)->only(['index', 'create', 'store', 'edit', 'update']);
+    Route::get('/products/lookup', ProductLookupController::class)->name('products.lookup');
+    Route::resource('products', ProductController::class)->only(['index']);
+    Route::resource('services', ServiceController::class)->only(['index']);
 
     Route::middleware('role:admin')->group(function () {
+        Route::delete('/sales/{sale}', [SaleController::class, 'destroy'])->name('sales.destroy');
+        Route::get('/credits', [CreditController::class, 'index'])->name('credits.index');
+        Route::get('/credits/{sale}/payment', [CreditController::class, 'payment'])->name('credits.payment');
+        Route::post('/credits/{sale}/payment', [CreditController::class, 'storePayment'])->name('credits.payment.store');
+        Route::delete('/customers/{customer}', [CustomerController::class, 'destroy'])->name('customers.destroy');
+        Route::resource('products', ProductController::class)->except(['index', 'show']);
         Route::resource('categories', CategoryController::class)->except(['show']);
         Route::resource('suppliers', SupplierController::class)->except(['show']);
+        Route::resource('services', ServiceController::class)->except(['index', 'show']);
+        Route::resource('expenses', ExpenseController::class)->except(['show']);
         Route::resource('users', UserController::class)->except(['show']);
     });
 });

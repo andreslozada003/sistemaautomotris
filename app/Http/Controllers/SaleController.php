@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Customer;
 use App\Models\Product;
 use App\Models\Sale;
+use App\Models\Service;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
@@ -19,7 +20,8 @@ class SaleController extends Controller
 
     public function create()
     {
-        $products = Product::where('active', true)->where('stock', '>', 0)->orderBy('name')->get();
+        $products = Product::with('primaryBarcode')->where('active', true)->where('stock', '>', 0)->orderBy('name')->get();
+        $services = Service::where('active', true)->orderBy('name')->get();
 
         return view('sales.create', [
             'customers' => Customer::orderBy('name')->get(),
@@ -27,9 +29,19 @@ class SaleController extends Controller
             'productOptions' => $products->map(fn ($product) => [
                 'id' => $product->id,
                 'code' => $product->code,
+                'sku' => $product->sku,
+                'barcode' => $product->primaryBarcode?->code,
                 'name' => $product->name,
                 'price' => (float) $product->sale_price,
+                'tax_rate' => (float) $product->tax_rate,
                 'stock' => $product->stock,
+            ])->values(),
+            'serviceOptions' => $services->map(fn ($service) => [
+                'id' => $service->id,
+                'code' => $service->code,
+                'name' => $service->name,
+                'price' => (float) $service->sale_price,
+                'tax_rate' => (float) $service->tax_rate,
             ])->values(),
         ]);
     }
@@ -38,11 +50,14 @@ class SaleController extends Controller
     {
         $data = $request->validate([
             'customer_id' => ['nullable', 'exists:customers,id'],
-            'payment_method' => ['required', 'in:efectivo,transferencia,tarjeta,mixto'],
+            'payment_method' => ['required', 'in:efectivo,transferencia,tarjeta,mixto,credito'],
+            'credit_due_date' => ['nullable', 'date', 'required_if:payment_method,credito'],
             'discount' => ['nullable', 'numeric', 'min:0'],
             'paid_amount' => ['required', 'numeric', 'min:0'],
             'items' => ['required', 'array', 'min:1'],
-            'items.*.product_id' => ['required', 'exists:products,id'],
+            'items.*.item_type' => ['required', 'in:product,service'],
+            'items.*.product_id' => ['nullable', 'exists:products,id'],
+            'items.*.service_id' => ['nullable', 'exists:services,id'],
             'items.*.quantity' => ['required', 'integer', 'min:1'],
         ]);
 
@@ -51,29 +66,95 @@ class SaleController extends Controller
         try {
             $sale = DB::transaction(function () use ($data, $discount) {
                 $subtotal = 0;
+                $taxTotal = 0;
                 $items = [];
 
                 foreach ($data['items'] as $item) {
-                    $product = Product::lockForUpdate()->findOrFail($item['product_id']);
+                    $quantity = (int) $item['quantity'];
 
-                    if (! $product->active || $product->stock < $item['quantity']) {
-                        throw new \RuntimeException("Stock insuficiente para {$product->name}.");
+                    if ($item['item_type'] === 'product') {
+                        if (empty($item['product_id'])) {
+                            throw new \RuntimeException('Selecciona un producto.');
+                        }
+
+                        $product = Product::lockForUpdate()->findOrFail($item['product_id']);
+
+                        if (! $product->active || $product->stock < $quantity) {
+                            throw new \RuntimeException("Stock insuficiente para {$product->name}.");
+                        }
+
+                        $lineName = $product->name;
+                        $unitPrice = (float) $product->sale_price;
+                        $taxRate = (float) $product->tax_rate;
+                        $productId = $product->id;
+                        $serviceId = null;
+                    } else {
+                        if (empty($item['service_id'])) {
+                            throw new \RuntimeException('Selecciona un servicio.');
+                        }
+
+                        $service = Service::findOrFail($item['service_id']);
+
+                        if (! $service->active) {
+                            throw new \RuntimeException("El servicio {$service->name} no esta activo.");
+                        }
+
+                        $lineName = $service->name;
+                        $unitPrice = (float) $service->sale_price;
+                        $taxRate = (float) $service->tax_rate;
+                        $productId = null;
+                        $serviceId = $service->id;
+                        $product = null;
                     }
 
-                    $lineSubtotal = (float) $product->sale_price * (int) $item['quantity'];
+                    $lineSubtotal = $unitPrice * $quantity;
+                    $lineTax = round($lineSubtotal * ($taxRate / 100), 2);
+                    $lineTotal = $lineSubtotal + $lineTax;
                     $subtotal += $lineSubtotal;
-                    $items[] = [$product, (int) $item['quantity'], $lineSubtotal];
+                    $taxTotal += $lineTax;
+                    $items[] = [
+                        'item_type' => $item['item_type'],
+                        'product' => $product,
+                        'product_id' => $productId,
+                        'service_id' => $serviceId,
+                        'name' => $lineName,
+                        'unit_price' => $unitPrice,
+                        'tax_rate' => $taxRate,
+                        'quantity' => $quantity,
+                        'subtotal' => $lineSubtotal,
+                        'tax_amount' => $lineTax,
+                        'total' => $lineTotal,
+                    ];
                 }
 
                 if ($discount > $subtotal) {
                     throw new \RuntimeException('El descuento no puede ser mayor que el subtotal.');
                 }
 
-                $total = $subtotal - $discount;
+                $total = ($subtotal - $discount) + $taxTotal;
 
-                if ((float) $data['paid_amount'] < $total) {
+                $paidAmount = (float) $data['paid_amount'];
+                $isCredit = $data['payment_method'] === 'credito';
+
+                if ($isCredit && empty($data['customer_id'])) {
+                    throw new \RuntimeException('Para vender a credito debes seleccionar un cliente.');
+                }
+
+                if (! $isCredit && $paidAmount < $total) {
                     throw new \RuntimeException('El valor pagado es menor que el total.');
                 }
+
+                if ($isCredit && $paidAmount > $total) {
+                    throw new \RuntimeException('El abono no puede ser mayor que el total.');
+                }
+
+                $balance = $isCredit ? $total - $paidAmount : 0;
+                $creditStatus = match (true) {
+                    ! $isCredit => 'sin_credito',
+                    $balance <= 0 => 'pagado',
+                    $paidAmount > 0 => 'abonado',
+                    default => 'pendiente',
+                };
 
                 $sale = Sale::create([
                     'invoice_number' => 'FV-'.now()->format('YmdHis').'-'.auth()->id(),
@@ -81,23 +162,33 @@ class SaleController extends Controller
                     'customer_id' => $data['customer_id'] ?? null,
                     'subtotal' => $subtotal,
                     'discount' => $discount,
-                    'tax' => 0,
+                    'tax' => $taxTotal,
                     'total' => $total,
-                    'paid_amount' => $data['paid_amount'],
-                    'change_amount' => (float) $data['paid_amount'] - $total,
+                    'paid_amount' => $paidAmount,
+                    'change_amount' => $isCredit ? 0 : $paidAmount - $total,
+                    'balance' => $balance,
+                    'credit_due_date' => $isCredit ? $data['credit_due_date'] : null,
+                    'credit_status' => $creditStatus,
                     'payment_method' => $data['payment_method'],
                 ]);
 
-                foreach ($items as [$product, $quantity, $lineSubtotal]) {
+                foreach ($items as $item) {
                     $sale->items()->create([
-                        'product_id' => $product->id,
-                        'product_name' => $product->name,
-                        'unit_price' => $product->sale_price,
-                        'quantity' => $quantity,
-                        'subtotal' => $lineSubtotal,
+                        'product_id' => $item['product_id'],
+                        'service_id' => $item['service_id'],
+                        'item_type' => $item['item_type'],
+                        'product_name' => $item['name'],
+                        'unit_price' => $item['unit_price'],
+                        'tax_rate' => $item['tax_rate'],
+                        'quantity' => $item['quantity'],
+                        'subtotal' => $item['subtotal'],
+                        'tax_amount' => $item['tax_amount'],
+                        'total' => $item['total'],
                     ]);
 
-                    $product->decrement('stock', $quantity);
+                    if ($item['product']) {
+                        $item['product']->decrement('stock', $item['quantity']);
+                    }
                 }
 
                 return $sale;
@@ -106,12 +197,17 @@ class SaleController extends Controller
             return back()->withInput()->withErrors($exception->getMessage());
         }
 
-        return redirect()->route('sales.show', $sale)->with('success', 'Venta registrada.');
+        return redirect()->route('sales.receipt', ['sale' => $sale, 'print' => 1])->with('success', 'Venta registrada.');
     }
 
     public function show(Sale $sale)
     {
         return view('sales.show', ['sale' => $sale->load(['items', 'user', 'customer'])]);
+    }
+
+    public function receipt(Sale $sale)
+    {
+        return view('sales.receipt', ['sale' => $sale->load(['items', 'user', 'customer'])]);
     }
 
     public function destroy(Sale $sale)

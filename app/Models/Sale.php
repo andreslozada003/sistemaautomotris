@@ -16,6 +16,9 @@ class Sale extends Model
         'total',
         'paid_amount',
         'change_amount',
+        'balance',
+        'credit_due_date',
+        'credit_status',
         'payment_method',
         'status',
     ];
@@ -27,6 +30,8 @@ class Sale extends Model
         'total' => 'decimal:2',
         'paid_amount' => 'decimal:2',
         'change_amount' => 'decimal:2',
+        'balance' => 'decimal:2',
+        'credit_due_date' => 'date',
     ];
 
     public function user()
@@ -42,5 +47,10 @@ class Sale extends Model
     public function items()
     {
         return $this->hasMany(SaleItem::class);
+    }
+
+    public function creditPayments()
+    {
+        return $this->hasMany(CreditPayment::class);
     }
 }

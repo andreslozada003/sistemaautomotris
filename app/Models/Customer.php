@@ -12,4 +12,9 @@ class Customer extends Model
     {
         return $this->hasMany(Sale::class);
     }
+
+    public function creditPayments()
+    {
+        return $this->hasMany(CreditPayment::class);
+    }
 }

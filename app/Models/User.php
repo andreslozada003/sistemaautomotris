@@ -55,6 +55,16 @@ class User extends Authenticatable
         return $this->hasMany(Sale::class);
     }
 
+    public function expenses()
+    {
+        return $this->hasMany(Expense::class);
+    }
+
+    public function creditPayments()
+    {
+        return $this->hasMany(CreditPayment::class);
+    }
+
     public function isAdmin(): bool
     {
         return $this->role === 'admin';

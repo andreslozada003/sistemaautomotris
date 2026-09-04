@@ -56,10 +56,13 @@
                 <a href="{{ route('sales.create') }}" @class(['active' => request()->routeIs('sales.create')])>Nueva venta</a>
                 <a href="{{ route('sales.index') }}" @class(['active' => request()->routeIs('sales.index', 'sales.show')])>Ventas</a>
                 <a href="{{ route('products.index') }}" @class(['active' => request()->routeIs('products.*')])>Productos</a>
+                <a href="{{ route('services.index') }}" @class(['active' => request()->routeIs('services.*')])>Servicios</a>
                 <a href="{{ route('customers.index') }}" @class(['active' => request()->routeIs('customers.*')])>Clientes</a>
                 @if(auth()->user()->isAdmin())
+                    <a href="{{ route('credits.index') }}" @class(['active' => request()->routeIs('credits.*')])>Creditos</a>
                     <a href="{{ route('categories.index') }}" @class(['active' => request()->routeIs('categories.*')])>Categorias</a>
                     <a href="{{ route('suppliers.index') }}" @class(['active' => request()->routeIs('suppliers.*')])>Proveedores</a>
+                    <a href="{{ route('expenses.index') }}" @class(['active' => request()->routeIs('expenses.*')])>Gastos</a>
                     <a href="{{ route('users.index') }}" @class(['active' => request()->routeIs('users.*')])>Usuarios</a>
                 @endif
                 <form method="post" action="{{ route('logout') }}">
@@ -83,5 +86,51 @@
 @else
     @yield('content')
 @endauth
+<script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+<script>
+    document.addEventListener('DOMContentLoaded', () => {
+        @if(session('success'))
+            Swal.fire({
+                icon: 'success',
+                title: 'Listo',
+                text: @json(session('success')),
+                confirmButtonColor: '#e50909',
+                timer: 2400,
+                timerProgressBar: true
+            });
+        @endif
+
+        @if($errors->any())
+            Swal.fire({
+                icon: 'error',
+                title: 'Revisa la informacion',
+                text: @json($errors->first()),
+                confirmButtonColor: '#e50909'
+            });
+        @endif
+
+        document.querySelectorAll('.swal-confirm').forEach((button) => {
+            button.addEventListener('click', (event) => {
+                event.preventDefault();
+
+                Swal.fire({
+                    icon: 'warning',
+                    title: button.dataset.title || 'Confirmar accion',
+                    text: button.dataset.text || 'Esta accion no se puede deshacer facilmente.',
+                    showCancelButton: true,
+                    confirmButtonText: button.dataset.confirm || 'Si, continuar',
+                    cancelButtonText: 'Cancelar',
+                    confirmButtonColor: '#e50909',
+                    cancelButtonColor: '#6b7280',
+                    reverseButtons: true
+                }).then((result) => {
+                    if (result.isConfirmed) {
+                        button.closest('form').submit();
+                    }
+                });
+            });
+        });
+    });
+</script>
 </body>
 </html>

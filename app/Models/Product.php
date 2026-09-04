@@ -10,10 +10,13 @@ class Product extends Model
         'category_id',
         'supplier_id',
         'code',
+        'sku',
         'name',
         'description',
+        'image_path',
         'purchase_price',
         'sale_price',
+        'tax_rate',
         'stock',
         'min_stock',
         'active',
@@ -22,6 +25,7 @@ class Product extends Model
     protected $casts = [
         'purchase_price' => 'decimal:2',
         'sale_price' => 'decimal:2',
+        'tax_rate' => 'decimal:2',
         'active' => 'boolean',
     ];
 
@@ -38,5 +42,15 @@ class Product extends Model
     public function saleItems()
     {
         return $this->hasMany(SaleItem::class);
+    }
+
+    public function barcodes()
+    {
+        return $this->hasMany(ProductBarcode::class);
+    }
+
+    public function primaryBarcode()
+    {
+        return $this->hasOne(ProductBarcode::class)->where('is_primary', true);
     }
 }
